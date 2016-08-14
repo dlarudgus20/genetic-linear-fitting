@@ -3,7 +3,9 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <fstream>
+#include <algorithm>
 #include <random>
 #include <string>
 #include <list>
@@ -86,7 +88,6 @@ void Save(HWND hWnd);
 void Load(HWND hWnd);
 
 constexpr int POINT_RADIUS = 8;
-constexpr int FPS = 60;
 
 HMENU hContextMenu;
 HBITMAP hDbBuffer = nullptr;
@@ -450,13 +451,15 @@ void Start()
 {
     nGeneration = 0;
 
-    std::uniform_real_distribution<double> dist { -100, 100 };
+    std::uniform_real_distribution<double> grad_dist { -100, 100 };
+    std::uniform_real_distribution<double> x0_dist { -WIDTH / 2.0, WIDTH / 2.0 };
+    std::uniform_real_distribution<double> y0_dist { -HEIGHT / 2.0, HEIGHT / 2.0 };
     for (auto& chromo : *parChromo)
     {
-        chromo.v.dx = dist(random_engine);
-        chromo.v.dy = dist(random_engine);
-        chromo.v.x0 = dist(random_engine);
-        chromo.v.y0 = dist(random_engine);
+        chromo.v.dx = grad_dist(random_engine);
+        chromo.v.dy = grad_dist(random_engine);
+        chromo.v.x0 = x0_dist(random_engine);
+        chromo.v.y0 = y0_dist(random_engine);
     }
 }
 
@@ -498,6 +501,12 @@ void NextGeneration()
     std::discrete_distribution<int> sel_dist { arValue.begin(), arValue.end() };
     std::uniform_int_distribution<unsigned> cross_dist { 0, 1 };
 
+    std::uniform_real_distribution<double> cross_mix_dist { 0, 1 };
+    const double CROSS_MIX_PROBABILITY = 0.1;
+
+    std::uniform_real_distribution<double> mutation_occur_dist { 0, 1 };
+    const double MUTATION_PROBABILITY = 0.03;
+
     for (unsigned idx = 0; idx < 100; ++idx)
     {
         unsigned idxFather = sel_dist(random_engine);
@@ -507,14 +516,40 @@ void NextGeneration()
             idxMother = sel_dist(random_engine);
         } while (idxMother == idxFather);
 
-        const std::array<const Chromosome*, 2> parents = {
-            &(*parChromo)[idxFather],
-            &(*parChromo)[idxMother]
-        };
+        const Chromosome* father = &(*parChromo)[idxFather];
+        const Chromosome* mother = &(*parChromo)[idxMother];
+        const std::array<const Chromosome*, 2> parents = { father, mother };
 
-        for (unsigned j = 0; j < parents[0]->ar.size(); ++j)
+        std::array<std::array<double, 2>, 4> mutation_parameter = {
+            50, 40,
+            50, 40,
+            125, 100,
+            125, 100,
+        };
+        for (unsigned j = 0; j < 4; ++j)
         {
-            (*parNewGen)[idx].ar[j] = parents[cross_dist(random_engine)]->ar[j];
+            double val;
+
+            if (cross_mix_dist(random_engine) <= CROSS_MIX_PROBABILITY)
+            {
+                val = parents[cross_dist(random_engine)]->ar[j];
+            }
+            else
+            {
+                val = (father->ar[j] + mother->ar[j]) / 2;
+            }
+
+            if (mutation_occur_dist(random_engine) <= MUTATION_PROBABILITY)
+            {
+                const auto& param = mutation_parameter[j];
+                double range = param[0] - param[1] * std::tanh((nGeneration - 5000.f) / 12000.0f);
+                std::normal_distribution<double> range_dist { range, 10 };
+                double range_noised = std::abs(range_dist(random_engine));
+                std::uniform_real_distribution<double> mutation_val_dist { val - range_noised, val + range_noised };
+                val = mutation_val_dist(random_engine);
+            }
+
+            (*parNewGen)[idx].ar[j] = val;
         }
     }
 
